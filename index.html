@@ -5,26 +5,27 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>iPTV 电视直播</title>
 <style>
-  :root{--bg:#0f1115;--card:#171a21;--line:#242a35;--fg:#e8eaed;--muted:#8b93a1;--acc:#3b82f6}
+  :root{--bg:#0f1115;--line:#242a35;--fg:#e8eaed;--muted:#8b93a1;--acc:#3b82f6}
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
        font:15px/1.6 "Microsoft YaHei",system-ui,-apple-system,sans-serif;
        display:flex;align-items:center;justify-content:center;padding:24px}
-  .box{max-width:440px;width:100%;text-align:center}
+  .box{max-width:460px;width:100%;text-align:center}
   .logo{font-size:44px;line-height:1;margin-bottom:18px}
   h1{font-size:19px;margin:0 0 10px;font-weight:600}
-  .sub{color:var(--muted);font-size:13px;margin-bottom:26px}
-  .spinner{width:36px;height:36px;margin:0 auto 20px;border-radius:50%;
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .spinner{width:36px;height:36px;margin:0 auto 18px;border-radius:50%;
            border:3px solid var(--line);border-top-color:var(--acc);
            animation:spin .9s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .btn{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;
-       padding:12px 30px;border-radius:10px;font-weight:600;font-size:15px;
-       box-shadow:0 6px 18px rgba(59,130,246,.32)}
+       padding:13px 34px;border-radius:10px;font-weight:600;font-size:15px;
+       box-shadow:0 6px 18px rgba(59,130,246,.32);margin:4px}
   .btn:active{transform:translateY(1px)}
+  .btn.alt{background:#242a35;box-shadow:none;border:1px solid var(--line);color:#cfd6e2}
   .err{background:#2a1518;border:1px solid #5c2b31;color:#ffb4b4;
-       padding:16px;border-radius:10px;font-size:13px;text-align:left;margin-bottom:18px}
-  .meta{margin-top:26px;color:#5d6675;font-size:11px;word-break:break-all}
+       padding:14px 16px;border-radius:10px;font-size:13px;text-align:left;margin-bottom:16px}
+  .src{color:#5d6675;font-size:11px;margin-top:14px}
   .hide{display:none}
 </style>
 </head>
@@ -32,26 +33,72 @@
 <div class="box">
   <div class="logo">📺</div>
   <h1>iPTV 电视直播</h1>
-  <div class="sub" id="sub">正在连接直播服务…</div>
+  <div class="sub" id="sub">正在获取最新直播地址…</div>
 
-  <div id="loading">
-    <div class="spinner"></div>
-  </div>
+  <div id="loading"><div class="spinner"></div></div>
 
   <div id="manual" class="hide">
-    <a class="btn" id="goBtn" href="#">▶ 进入直播</a>
+    <a class="btn" id="goBtn" href="#" style="display:none">▶ 进入直播</a>
+    <a class="btn alt" href="javascript:location.reload()">↻ 重新加载</a>
   </div>
 
   <div id="error" class="err hide"></div>
-
-  <div class="meta" id="meta"></div>
+  <div class="src" id="src"></div>
 </div>
 
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var REDIRECT_DELAY = 600;      // 拿到地址后多久自动跳
-  var TIMEOUT = 9000;            // 读取配置的最长等待
+  var cb = function () { return '?t=' + Date.now() + Math.random().toString(36).slice(2); };
+
+  // 多源兜底：Pages CDN 有缓存，raw 源更新更快，依次尝试
+  var SOURCES = [
+    { url: 'https://raw.githubusercontent.com/876086405Git/iptv-portal/main/latest.json' + cb(), label: 'raw' },
+    { url: 'latest.json' + cb(), label: 'pages' },
+    { url: 'https://cdn.jsdelivr.net/gh/876086405Git/iptv-portal@main/latest.json' + cb(), label: 'jsdelivr' }
+  ];
+
+  function trySource(i, foundUrls) {
+    if (i >= SOURCES.length) {
+      if (foundUrls.length) return showManual(foundUrls);
+      return showError('暂时获取不到直播地址。\n请稍后点击"重新加载"，或联系我要最新网址。');
+    }
+    var s = SOURCES[i];
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 7000) : null;
+
+    fetch(s.url, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        if (timer) clearTimeout(timer);
+        var u = d && d.url;
+        if (u && /^https?:\/\//i.test(u)) {
+          foundUrls.push(u);
+          // 拿到就立刻跳，不再等其他源（快）
+          go(u, s.label);
+        } else throw new Error('地址无效');
+      })
+      .catch(function () {
+        if (timer) clearTimeout(timer);
+        trySource(i + 1, foundUrls);
+      });
+  }
+
+  function go(url, label) {
+    $('sub').textContent = '正在进入…';
+    $('src').textContent = '';
+    setTimeout(function () { location.replace(url); }, 350);
+  }
+
+  function showManual(urls) {
+    $('loading').classList.add('hide');
+    $('sub').textContent = '自动跳转没成功，请手动点击';
+    var b = $('goBtn');
+    b.href = urls[0];
+    b.style.display = 'inline-block';
+    $('manual').classList.remove('hide');
+    $('src').textContent = urls[0];
+  }
 
   function showError(msg) {
     $('loading').classList.add('hide');
@@ -59,44 +106,10 @@
     e.textContent = msg;
     e.classList.remove('hide');
     $('sub').textContent = '暂时无法连接';
+    $('manual').classList.remove('hide');
   }
 
-  function go(url) {
-    $('sub').textContent = '正在进入…';
-    $('goBtn').href = url;
-    $('meta').textContent = url;
-    setTimeout(function () { location.replace(url); }, REDIRECT_DELAY);
-  }
-
-  // 加时间戳绕过缓存，确保拿到最新地址
-  var bust = '?t=' + Date.now();
-  var done = false;
-  var timer = setTimeout(function () {
-    if (done) return;
-    done = true;
-    // 超时不报死，给一个手动入口（用最后已知地址）
-    showError('读取最新地址超时。可能是网络较慢，请刷新本页重试。');
-  }, TIMEOUT);
-
-  fetch('latest.json' + bust, { cache: 'no-store' })
-    .then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function (d) {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      var url = d && d.url;
-      if (!url || !/^https?:\/\//i.test(url)) throw new Error('地址无效');
-      go(url);
-    })
-    .catch(function (err) {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      showError('获取直播地址失败：' + err.message + '\n请刷新页面重试。');
-    });
+  trySource(0, []);
 })();
 </script>
 </body>
