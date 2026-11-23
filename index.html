@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iPTV 电视直播</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#242a35;--fg:#e8eaed;--muted:#8b93a1;--acc:#3b82f6}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
+       font:15px/1.6 "Microsoft YaHei",system-ui,-apple-system,sans-serif;
+       display:flex;align-items:center;justify-content:center;padding:24px}
+  .box{max-width:440px;width:100%;text-align:center}
+  .logo{font-size:44px;line-height:1;margin-bottom:18px}
+  h1{font-size:19px;margin:0 0 10px;font-weight:600}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:26px}
+  .spinner{width:36px;height:36px;margin:0 auto 20px;border-radius:50%;
+           border:3px solid var(--line);border-top-color:var(--acc);
+           animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .btn{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;
+       padding:12px 30px;border-radius:10px;font-weight:600;font-size:15px;
+       box-shadow:0 6px 18px rgba(59,130,246,.32)}
+  .btn:active{transform:translateY(1px)}
+  .err{background:#2a1518;border:1px solid #5c2b31;color:#ffb4b4;
+       padding:16px;border-radius:10px;font-size:13px;text-align:left;margin-bottom:18px}
+  .meta{margin-top:26px;color:#5d6675;font-size:11px;word-break:break-all}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">📺</div>
+  <h1>iPTV 电视直播</h1>
+  <div class="sub" id="sub">正在连接直播服务…</div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+  </div>
+
+  <div id="manual" class="hide">
+    <a class="btn" id="goBtn" href="#">▶ 进入直播</a>
+  </div>
+
+  <div id="error" class="err hide"></div>
+
+  <div class="meta" id="meta"></div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var REDIRECT_DELAY = 600;      // 拿到地址后多久自动跳
+  var TIMEOUT = 9000;            // 读取配置的最长等待
+
+  function showError(msg) {
+    $('loading').classList.add('hide');
+    var e = $('error');
+    e.textContent = msg;
+    e.classList.remove('hide');
+    $('sub').textContent = '暂时无法连接';
+  }
+
+  function go(url) {
+    $('sub').textContent = '正在进入…';
+    $('goBtn').href = url;
+    $('meta').textContent = url;
+    setTimeout(function () { location.replace(url); }, REDIRECT_DELAY);
+  }
+
+  // 加时间戳绕过缓存，确保拿到最新地址
+  var bust = '?t=' + Date.now();
+  var done = false;
+  var timer = setTimeout(function () {
+    if (done) return;
+    done = true;
+    // 超时不报死，给一个手动入口（用最后已知地址）
+    showError('读取最新地址超时。可能是网络较慢，请刷新本页重试。');
+  }, TIMEOUT);
+
+  fetch('latest.json' + bust, { cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (d) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      var url = d && d.url;
+      if (!url || !/^https?:\/\//i.test(url)) throw new Error('地址无效');
+      go(url);
+    })
+    .catch(function (err) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      showError('获取直播地址失败：' + err.message + '\n请刷新页面重试。');
+    });
+})();
+</script>
+</body>
+</html>
