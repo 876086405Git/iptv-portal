@@ -25,7 +25,7 @@
   .btn.alt{background:#242a35;box-shadow:none;border:1px solid var(--line);color:#cfd6e2}
   .err{background:#2a1518;border:1px solid #5c2b31;color:#ffb4b4;
        padding:14px 16px;border-radius:10px;font-size:13px;text-align:left;margin-bottom:16px}
-  .src{color:#5d6675;font-size:11px;margin-top:14px}
+  .src{color:#5d6675;font-size:11px;margin-top:14px;word-break:break-all}
   .hide{display:none}
 </style>
 </head>
@@ -49,67 +49,83 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var cb = function () { return '?t=' + Date.now() + Math.random().toString(36).slice(2); };
+  var rnd = function () { return '?t=' + Date.now() + Math.random().toString(36).slice(2); };
 
-  // 多源兜底：Pages CDN 有缓存，raw 源更新更快，依次尝试
+  // 多个源并发请求，取 updated 最新的那个（各 CDN 刷新速度不同，必须比时间）
   var SOURCES = [
-    { url: 'https://raw.githubusercontent.com/876086405Git/iptv-portal/main/latest.json' + cb(), label: 'raw' },
-    { url: 'latest.json' + cb(), label: 'pages' },
-    { url: 'https://cdn.jsdelivr.net/gh/876086405Git/iptv-portal@main/latest.json' + cb(), label: 'jsdelivr' }
+    'https://cdn.jsdelivr.net/gh/876086405Git/iptv-portal@main/latest.json' + rnd(),
+    'https://raw.githubusercontent.com/876086405Git/iptv-portal/main/latest.json' + rnd(),
+    'https://876086405git.github.io/iptv-portal/latest.json' + rnd(),
+    'https://fastly.jsdelivr.net/gh/876086405Git/iptv-portal@main/latest.json' + rnd()
   ];
+  var WAIT = 4000;   // 最多等这么久收集结果
 
-  function trySource(i, foundUrls) {
-    if (i >= SOURCES.length) {
-      if (foundUrls.length) return showManual(foundUrls);
-      return showError('暂时获取不到直播地址。\n请稍后点击"重新加载"，或联系我要最新网址。');
+  function parseTime(s) {
+    if (!s) return 0;
+    var t = Date.parse(String(s).replace(/-/g, '/'));
+    return isNaN(t) ? 0 : t;
+  }
+
+  function toDataDate(d) {
+    try {
+      var h = new XMLHttpRequest();
+      h.open('HEAD', d.url, false);
+      h.send();
+      var lm = h.getResponseHeader('Last-Modified');
+      return lm ? Date.parse(lm) : 0;
+    } catch (e) { return 0; }
+  }
+
+  var results = [];
+  var finished = 0;
+  var decided = false;
+
+  function decide() {
+    if (decided) return;
+    if (!results.length) {
+      if (finished >= SOURCES.length) showError();
+      return;
     }
-    var s = SOURCES[i];
-    var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 7000) : null;
+    decided = true;
+    // 取 updated 最新的
+    results.sort(function (a, b) { return b.ts - a.ts; });
+    var best = results[0];
+    $('sub').textContent = '正在进入…';
+    $('src').textContent = '';
+    setTimeout(function () { location.replace(best.url); }, 300);
+  }
 
-    fetch(s.url, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+  function fetchOne(u) {
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, WAIT) : null;
+    fetch(u, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (d) {
         if (timer) clearTimeout(timer);
-        var u = d && d.url;
-        if (u && /^https?:\/\//i.test(u)) {
-          foundUrls.push(u);
-          // 拿到就立刻跳，不再等其他源（快）
-          go(u, s.label);
-        } else throw new Error('地址无效');
+        var url = d && d.url;
+        if (!url || !/^https?:\/\//i.test(url)) throw new Error('bad url');
+        results.push({ url: url, ts: parseTime(d.updated) });
       })
-      .catch(function () {
-        if (timer) clearTimeout(timer);
-        trySource(i + 1, foundUrls);
+      .catch(function () { if (timer) clearTimeout(timer); })
+      .then(function () {
+        finished++;
+        if (finished >= SOURCES.length) decide();
       });
   }
 
-  function go(url, label) {
-    $('sub').textContent = '正在进入…';
-    $('src').textContent = '';
-    setTimeout(function () { location.replace(url); }, 350);
-  }
+  SOURCES.forEach(fetchOne);
 
-  function showManual(urls) {
-    $('loading').classList.add('hide');
-    $('sub').textContent = '自动跳转没成功，请手动点击';
-    var b = $('goBtn');
-    b.href = urls[0];
-    b.style.display = 'inline-block';
-    $('manual').classList.remove('hide');
-    $('src').textContent = urls[0];
-  }
+  // 最多等 WAIT，拿到就提前决定
+  setTimeout(decide, WAIT + 200);
 
-  function showError(msg) {
+  function showError() {
     $('loading').classList.add('hide');
     var e = $('error');
-    e.textContent = msg;
+    e.textContent = '暂时获取不到直播地址。\n请点"重新加载"，或联系我要最新网址。';
     e.classList.remove('hide');
     $('sub').textContent = '暂时无法连接';
     $('manual').classList.remove('hide');
   }
-
-  trySource(0, []);
 })();
 </script>
 </body>
